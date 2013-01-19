@@ -1,0 +1,137 @@
+#!/usr/bin/env ruby
+
+require 'net/http'
+require 'uri'
+require 'json'
+require 'optparse'
+
+class RaiderScanner
+  MOP_RAIDS = [6067, 6297, 6125]
+
+  def class_id_to_name(id)
+    case id
+      when 1 then "Warrior"
+      when 2 then "Paladin"
+      when 3 then "Hunter"
+      when 4 then "Rogue"
+      when 5 then "Priest"
+      when 6 then "Death Knight"
+      when 7 then "Shaman"
+      when 8 then "Mage"
+      when 9 then "Warlock"
+      when 10 then "Monk"
+      when 11 then "Druid"
+      else "Unknown"
+    end
+  end
+
+  def print_raider_specs(json)
+    talents = json["talents"]
+
+    specs = []
+    talents.each do |talent|
+      spec_info = {}
+      spec_info[:name] = talent["spec"]["name"]
+      spec_info[:role] = talent["spec"]["role"]
+      spec_info[:selected] = talent["selected"]
+      specs << spec_info
+    end
+    puts "--------------------------------"
+    puts "Specs"
+    puts "--------------------------------"
+    specs.each do |spec|
+      selected = spec[:selected] ? "\u2713 " : "  "
+      puts "#{selected} #{spec[:name]} (#{spec[:role]})"
+    end
+
+  end
+
+  def print_raider(json)
+    name = json["name"]
+    class_id = json["class"]
+    level = json["level"]
+    items = json["items"]
+    average_equipped_ilvl = items["averageItemLevelEquipped"]
+
+    puts "--------------------------------"
+    puts "Character Info"
+    puts "--------------------------------"
+
+    puts "Name: #{name}"
+    puts "Level: #{level}"
+    puts "Class: #{class_id_to_name class_id}"
+    puts "Equipped ilvl: #{average_equipped_ilvl}"
+
+    print_raider_specs json
+  end
+
+  def print_raid_summary(json)
+    bosses = json["bosses"]
+    downed_bosses = 0
+    
+
+    puts "Raid: #{json["name"]}, Progression: #{downed_bosses}/#{bosses.count}"
+  end
+
+  def print_raid_progression(json)
+    puts "--------------------------------"
+    puts "Raid Progression"
+    puts "--------------------------------"
+
+    progression = json["progression"]
+    raids = progression["raids"]
+
+    raids.each do |raid|
+      if MOP_RAIDS.include? raid["id"]
+        bosses = raid["bosses"]
+        normal_downed = 0
+        heroic_downed = 0
+        bosses.each do |boss|
+          normal_kills = boss["normalKills"]
+          heroic_kills = boss["heroicKills"]
+          normal_downed +=1 if normal_kills > 0
+          heroic_downed +=1 if heroic_kills > 0
+        end
+
+        puts "#{raid["name"]} -- Normal (#{normal_downed}/#{bosses.count}) -- Heroic (#{heroic_downed}/#{bosses.count})"
+        bosses.each do |boss|
+          normal_kills = boss["normalKills"]
+          heroic_kills = boss["heroicKills"]
+          name = boss["name"]
+          puts "\t#{name}  -- #{normal_kills} | #{heroic_kills}" 
+        end
+      end
+    end
+  end
+
+  def find_raider(realm, name)
+    url = "http://us.battle.net/api/wow/character/#{realm}/#{name}?fields=progression,items,talents"
+    uri = URI.parse(url)
+    response = Net::HTTP::get_response(uri)
+    json = JSON.parse(response.body)
+
+    unless json["status"] == "nok"
+      print_raider json
+      print_raid_progression json
+    else
+      puts "ERROR: Raider not found! - Please check the realm and name you entered."
+    end
+  end
+end
+
+options = {}
+
+opts = OptionParser.new
+opts.on('-r', '--realm', 'Realm to search') { |s| options[:realm] = s }
+opts.on('-n', '--name', 'Character name') { |s| options[:name] = s }
+opts.on('-h', '--help') do
+  puts opts
+end
+
+args = opts.parse(*ARGV)
+scanner = RaiderScanner.new
+
+if options[:realm] && options[:name]
+  scanner.find_raider(args[0], args[1])
+end
+
